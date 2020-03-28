@@ -104,6 +104,49 @@ char * download_file(char * host, char * port, char * path) {
     }
 }
 ```
+코드를 살펴보면, 첫 부분에서는 서버와 연결하고, 서버에 리퀘스트를 보낸 뒤 그 응답을 파싱하는 함수이다. 이 중 가장 핵심적인 부분은 서버로부터의 응답을 처리하는 루프이다.
+```c++
+/* receive HTTP response */
+response = malloc(SIZE_RESPONSE);
+while (1) {
+    if (readline(sock, response, SIZE_RESPONSE)) {
+        /* Skip too long request */
+        continue;
+    }
+
+    if ( * response == '\0') {
+        /* end of response headers */
+        break;
+    }
+
+    /* parse response header */
+    parse_response(response, & key, & value);
+    if (key == NULL || value == NULL) {
+        continue;
+    }
+
+    if (strcmp(key, "location") == 0) {
+        /* validate URL */
+        if (!validate_url(value) || value[0] == '/') {
+            /* follow redirects */
+            redirect = malloc(strlen(value) + 1);
+            memcpy(redirect, value, strlen(value));
+
+            /* no longer need html */
+            if (html) free(html);
+        } else {
+            /* location value is neither URL nor path */
+            fatal("Redirected URL must start with 'http://' or '/'");
+        }
+    } else if (strcmp(key, "content-length") == 0) {
+        /* allocate buffer for html */
+        length = atol(value);
+        html = malloc(length + 1);
+        if (html == NULL) fatal("Memory error");
+    }
+}
+```
+
 루프에서는 서버로부터 응답을 한 줄 씩("\r\n" 으로 구분함) 읽어
 * **"\0"** 으로 시작하는 경우 루프를 빠져나온다
 * **KEY: VALUE** 의 구조가 아닌 줄은 건너 뛴다.
@@ -119,9 +162,9 @@ memcpy(redirect, value, strlen(value));
 ```
 이것이 왜 취약점인지 잘 연상이 안 될 수도 있지만, **memcpy** 로 문자열을 복사하는 데 주목하자. **strlen(value)** 크기만을 복사하게 되면 문자열 끝에 있는 **널바이트**가 **redirect**에는 빠지게 된다. 따라서 이 부분을 잘 활용하면 릭을 낼 수 있다.
 
- 취약점과 별개로 한 가지 중요한 것은, **content-length** 키를 전송하면 임의 사이즈의 청크를 할당할 수 있다는 것이다. 또한, **location** 에서 전송된 **value** 의 길이만큼의 공간을 **malloc ** 하고, 그 곳에 내용을 쓸 수 있다는 것이다. 이것을 이용해 공격 서버를 프로그래밍 할 수 있다.
+ 취약점과 별개로 한 가지 중요한 것은, **content-length** 키를 전송하면 임의 사이즈의 청크를 할당할 수 있다는 것이다. 또한, **location** 에서 전송된 **value** 의 길이만큼의 공간을 **malloc** 하고, 그 곳에 내용을 쓸 수 있다는 것이다. 이것을 이용해 공격 서버를 프로그래밍 할 수 있다.
 
-하지만, 아직 한 가지 문제가 있는데, 서버로 프로그램의 libc 주소를 알려줄 **leak** 을 보내야 한다는 것이다. 따라서, 취약점 하나를 더 찾아보자. 여기서는 서버에 데이터를 전송하는 유일한 코드인
+하지만 아직 한 가지 문제가 있는데, 서버로 프로그램의 libc 주소를 알려줄 **leak** 을 보내야 한다는 것이다. 여기서는 서버에 데이터를 전송하는 유일한 코드인
 ```c++
 request = malloc(SIZE_HEADER + strlen(path) + strlen(host) + 1);
 sprintf(request, "GET /%s HTTP/1.1\r\nHost: %s:%s\r\n\r\n", path, host, port);
