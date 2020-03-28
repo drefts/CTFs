@@ -1,7 +1,7 @@
 # Zer0pts 2020 wget writeup
 ##  1. 취약점 분석
 아래는 oget.c 에서 가장 핵심적인 부분인 download_file 함수이다. 이 함수를 이용해 공격 서버를 구성하고 익스플로잇을 수행할 것이다.
-
+```c++
       char *download_file(char *host, char *port, char *path) {
       int sock;
       unsigned long length;
@@ -103,16 +103,17 @@
         return html;
       }
     }
-
+```
 함수의 동작을 살펴보자. 함수는 파싱된 호스트, 포트, 경로를 인자로 받아 해당 서버에 요청(Requset)을 보낸다.
-
+```c++
     request = malloc(SIZE_HEADER + strlen(path) + strlen(host) + 1);
     sprintf(request, "GET /%s HTTP/1.1\r\nHost: %s:%s\r\n\r\n", path, host, port);
     write(sock, request, strlen(request));
+```
 이 부분에서 리퀘스트 문자열을 생성하고 서버에 보내는 것을 알 수 있다.
 
 다음으로, 서버로부터 리스폰스를 받아 리스폰스 헤더를 분석하는 루프 코드를 발견할 수 있다.
-
+```c++
     /* receive HTTP response */
       response = malloc(SIZE_RESPONSE);
       while (1) {
@@ -152,6 +153,7 @@
           if (html == NULL) fatal("Memory error");
         }
       }
+```
 루프에서는 서버로부터 응답을 한 줄 씩("\r\n" 으로 구분함) 읽어
 * **"\0"** 으로 시작하는 경우 루프를 빠져나온다
 * **KEY: VALUE** 의 구조가 아닌 줄은 건너 뛴다.
@@ -161,24 +163,24 @@
 이 부분에서 취약점이 두 개 발견된다. 첫 번째는, 서버의 응답이 **location** 을 여러 번 포함할 경우 이 부분이 여러 번 불리면서 **html** 변수를 반복해 **free** 하는 것이다. **free** 를 하고 나서 **html** 을 0으로 초기화하지 않으므로 **html** 에는 이미 **free**된 주소가 남아있고, 이 것을 다시 한번 **free**할 경우 **double free bug** 가 발생한다. 이 프로그램은 **libc 2.27** 을 사용하므로 **tcache** 를 사용하고, 따라서 **tcache** 사이즈 이내에서 더블 프리에 아무런 문제가 없다.
 
 두 번째 취약점은, 아래 코드에 있다.
-
+```c++
     redirect = malloc(strlen(value) + 1);
     memcpy(redirect, value, strlen(value));
-
+```
 이것이 왜 취약점인지 잘 연상이 안 될 수도 있지만, **memcpy** 로 문자열을 복사하는 데 주목하자. **strlen(value)** 크기만을 복사하게 되면 문자열 끝에 있는 **널바이트**가 **redirect**에는 빠지게 된다. 따라서 이 부분을 잘 활용하면 릭을 낼 수 있다.
 
  취약점과 별개로 한 가지 중요한 것은, **content-length** 키를 전송하면 임의 사이즈의 청크를 할당할 수 있다는 것이다. 또한, **location** 에서 전송된 **value** 의 길이만큼의 공간을 **malloc ** 하고, 그 곳에 내용을 쓸 수 있다는 것이다. 이것을 이용해 공격 서버를 프로그래밍 할 수 있다.
 
 하지만, 아직 한 가지 문제가 있는데, 서버로 프로그램의 libc 주소를 알려줄 **leak** 을 보내야 한다는 것이다. 따라서, 취약점 하나를 더 찾아보자. 여기서는 서버에 데이터를 전송하는 유일한 코드인
-
+```c++
     request = malloc(SIZE_HEADER + strlen(path) + strlen(host) + 1);
     sprintf(request, "GET /%s HTTP/1.1\r\nHost: %s:%s\r\n\r\n", path, host, port);
     write(sock, request, strlen(request));
-
+```
 이 부분에 주목할 것이다.
 
 코드의 뒷부분을 좀 더 살펴보자
-
+```c++
     if (redirect) {
         /* support for omitted hostname */
         if (redirect[0] == '/') {
@@ -190,18 +192,18 @@
     /* redirect to the new URL and return it's HTML */
     close(sock);
     return omega_get(redirect);
-
+```
 이 부분에서 **redirect** 가 할당되어 있는 경우 재귀호출을 통해 리다이렉션을 수행한다. 여기서 앞서 살펴 본 바에 따르면, **location** 에 **http://** 로 시작하는 url이나 **/** 로 시작하는 문자열을 보내면 그 뒤에 널 바이트가 붙지 않아 발생한 릭이 url에 붙게 된다. 익스플로잇에서는 하나의 공격 서버만 사용할 것이므로 모두 **/** 로 시작하는 리다이렉션 주소를 보낼 것이다. 그러면, **omega_get** 에서 다시 불린 **download_file** 함수에 릭이 포함된 **path** 가 들어가고, 
-
+```c++
     request = malloc(SIZE_HEADER + strlen(path) + strlen(host) + 1);
     sprintf(request, "GET /%s HTTP/1.1\r\nHost: %s:%s\r\n\r\n", path, host, port);
     write(sock, request, strlen(request));
-
+```
 이 부분에 의해 **path** 가 서버로 전송되면서 서버는 프로그램의 릭을 획득할 수 있다.
 
 ## 2. Actual Exploit
 다음은 *server.py* 코드이다.
-
+```python
     import socket
     from pwn import *
     
@@ -301,7 +303,7 @@
                             break
                     except:
                             p += 1
-
+```
 익스플로잇의 흐름은 앞서 살펴봤듯, 릭의 획득과 원격 쉘의 획득 두 가지 과정으로 나뉜다. 실제 익스플로잇에서 사용된 주목할 만 한 사항은 아래와 같다.
 * 1. **tcache**에 들어가는 조금 큰 사이즈 청크를 8번 free해 **libc main arena** 의 주소가 청크에 적히게 한다.
 * 2. 해당 청크에 **location** 으로 8바이트 문자열("/xxxxxxx") 을 할당시킨다. 그러면 청크의 8바이트 뒤의  **libc main arena** 가 손상을 받지 않고 다음 번 리퀘스트에 같이 딸려나오게 된다.
