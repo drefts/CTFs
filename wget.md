@@ -104,7 +104,15 @@ char * download_file(char * host, char * port, char * path) {
     }
 }
 ```
-코드를 살펴보면, 첫 부분에서는 서버와 연결하고, 서버에 리퀘스트를 보낸 뒤 그 응답을 파싱하는 함수이다. 이 중 가장 핵심적인 부분은 서버로부터의 응답을 처리하는 루프이다.
+함수의 동작을 살펴보자. 함수는 파싱된 호스트, 포트, 경로를 인자로 받아 해당 서버에 요청(Requset)을 보낸다.
+```c++
+request = malloc(SIZE_HEADER + strlen(path) + strlen(host) + 1);
+sprintf(request, "GET /%s HTTP/1.1\r\nHost: %s:%s\r\n\r\n", path, host, port);
+write(sock, request, strlen(request));
+```
+이 부분에서 리퀘스트 문자열을 생성하고 서버에 보내는 것을 알 수 있다.
+
+다음으로, 서버로부터 리스폰스를 받아 리스폰스 헤더를 분석하는 루프 코드를 발견할 수 있다.
 ```c++
 /* receive HTTP response */
 response = malloc(SIZE_RESPONSE);
