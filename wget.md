@@ -2,7 +2,7 @@
 ##  1. 취약점 분석
 아래는 oget.c 에서 가장 핵심적인 부분인 download_file 함수이다. 이 함수를 이용해 공격 서버를 구성하고 익스플로잇을 수행할 것이다.
 ```c++
-      char *download_file(char *host, char *port, char *path) {
+char *download_file(char *host, char *port, char *path) {
       int sock;
       unsigned long length;
       struct addrinfo server, *res;
