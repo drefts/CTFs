@@ -58,6 +58,16 @@ There are fopen check routines, but there is no check routine about actual file 
 ulimit -f 0
 ```
 
+This ulimit command limits programs to write file.
+
+Therefore, the program cannot write any content into file, and it recieves SIGXFSZ signal.
+
+Without any settings, "./otp 0" will be terminated with that signal.
+
+If that signal is bypassed with other program, fread's return value may be zero.
+
+Bypass code is below
+
 ```python
 from pwn import *
 p = process(['./otp', '0'])
